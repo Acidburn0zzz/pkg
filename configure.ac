@@ -48,6 +48,11 @@ AC_ARG_ENABLE([pie],
 
 AM_CONDITIONAL([ENABLE_PIE], [test "x$enable_pie" = "xyes"])
 
+AC_ARG_ENABLE([safestack],
+    AS_HELP_STRING([--enable-safestack], [Enable SafeStack]))
+
+AM_CONDITIONAL([ENABLE_SAFESTACK], [test "x$enable_safestack" = "xyes"])
+
 if test "$ac_cv_func_mmap_fixed_mapped" = "yes"; then
     FILEMAP=unixfilemap
 else
