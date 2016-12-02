@@ -5,6 +5,8 @@ if HAVE_ELF_ABI
 LDFLAGS+=	-Wl,--enable-new-dtags
 endif
 
+pkg_LDFLAGS=
+
 pkg_SOURCES=		add.c \
 			alias.c \
 			annotate.c \
@@ -75,7 +77,12 @@ pkg_static_LDADD= @OS_LDFLAGS@ \
 
 if ENABLE_PIE
 pkg_CFLAGS+=	-fPIE -pie
-pkg_LDFLAGS=	-pie
+pkg_LDFLAGS+=	-pie
+endif
+
+if ENABLE_SAFESTACK
+pkg_CFLAGS+=	-fsanitize=safe-stack
+pkg_LDFLAGS+=	-fsanitize=safe-stack
 endif
 
 if HAVE_ELF_ABI
@@ -98,6 +105,10 @@ if BUILD_STATIC
 
 pkg_static_LDFLAGS=	-all-static
 sbin_PROGRAMS=		pkg-static
+
+if ENABLE_SAFESTACK
+pkg_static_LDFLAGS+=	-fsanitize=safe-stack
+endif
 
 if DYNAMIC
 sbin_PROGRAMS+=		$(DYNPROG)
