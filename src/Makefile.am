@@ -79,7 +79,7 @@ pkg_static_LDADD= @OS_LDFLAGS@ \
 			-lm
 
 if ENABLE_PIE
-pkg_CFLAGS+=	-fPIE -pie
+pkg_CFLAGS+=	-fPIC -fPIE -pie
 pkg_LDFLAGS+=	-pie
 endif
 
