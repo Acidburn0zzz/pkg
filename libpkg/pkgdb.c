@@ -127,7 +127,7 @@ pkgdb_regex(sqlite3_context *ctx, int argc, sqlite3_value **argv)
 		else
 			cflags = REG_EXTENDED | REG_NOSUB | REG_ICASE;
 
-		re = malloc(sizeof(regex_t));
+		re = xmalloc(sizeof(regex_t));
 		if (regcomp(re, regex, cflags) != 0) {
 			sqlite3_result_error(ctx, "Invalid regex\n", -1);
 			free(re);
@@ -917,14 +917,18 @@ pkgdb_access(unsigned mode, unsigned database)
 	return (retval);
 }
 
-static void
-pkgdb_profile_callback(void *ud __unused, const char *req, sqlite3_uint64 nsec)
+static int
+pkgdb_profile_callback(unsigned type __unused, void *ud __unused,
+    void *stmt, void *X)
 {
+	sqlite3_uint64 nsec = *((sqlite3_uint64*)X);
+	const char *req = sqlite3_sql((sqlite3_stmt *)stmt);
 	/* According to sqlite3 documentation, nsec has milliseconds accuracy */
 	nsec /= 1000000LLU;
 	if (nsec > 0)
 		pkg_debug(1, "Sqlite request %s was executed in %lu milliseconds",
 			req, (unsigned long)nsec);
+	return (0);
 }
 
 int
@@ -943,12 +947,7 @@ pkgdb_open_repos(struct pkgdb *db, const char *reponame)
 		if (reponame == NULL || strcasecmp(r->name, reponame) == 0) {
 			/* We need read only access here */
 			if (r->ops->open(r, R_OK) == EPKG_OK) {
-				item = malloc(sizeof(*item));
-				if (item == NULL) {
-					pkg_emit_errno("malloc", "_pkg_repo_list_item");
-					return (EPKG_FATAL);
-				}
-
+				item = xmalloc(sizeof(*item));
 				r->ops->init(r);
 				item->repo = r;
 				LL_PREPEND(db->repos, item);
@@ -1056,11 +1055,8 @@ pkgdb_open_all(struct pkgdb **db_p, pkgdb_t type, const char *reponame)
 		db = *db_p;
 	}
 
-	if (!reopen && (db = calloc(1, sizeof(struct pkgdb))) == NULL) {
-		pkg_emit_errno("malloc", "pkgdb");
-		return (EPKG_FATAL);
-	}
-
+	if (!reopen)
+		db = xcalloc(1, sizeof(struct pkgdb));
 	db->prstmt_initialized = false;
 
 	if (!reopen) {
@@ -1157,7 +1153,8 @@ retry:
 	profile = pkg_object_bool(pkg_config_get("SQLITE_PROFILE"));
 	if (profile) {
 		pkg_debug(1, "pkgdb profiling is enabled");
-		sqlite3_profile(db->sqlite, pkgdb_profile_callback, NULL);
+		sqlite3_trace_v2(db->sqlite, SQLITE_TRACE_PROFILE,
+		    pkgdb_profile_callback, NULL);
 	}
 
 	*db_p = db;
@@ -1216,12 +1213,7 @@ run_transaction(sqlite3 *sqlite, const char *query, const char *savepoint)
 
 	assert(sqlite != NULL);
 
-	asprintf(&sql, "%s %s", query, savepoint != NULL ? savepoint : "");
-	if (sql == NULL) {
-		pkg_emit_error("out of memory");
-		return (EPKG_FATAL);
-	}
-
+	xasprintf(&sql, "%s %s", query, savepoint != NULL ? savepoint : "");
 	pkg_debug(4, "Pkgdb: running '%s'", sql);
 	ret = sqlite3_prepare_v2(sqlite, sql, strlen(sql) + 1, &stmt, NULL);
 
@@ -2446,7 +2438,7 @@ get_sql_string(sqlite3 *s, const char *sql, char **res)
 	if (ret == SQLITE_ROW) {
 		const unsigned char *tmp;
 		tmp = sqlite3_column_text(stmt, 0);
-		*res = (tmp == NULL ? NULL : strdup(tmp));
+		*res = (tmp == NULL ? NULL : xstrdup(tmp));
 	}
 
 	if (ret == SQLITE_DONE)
@@ -2649,7 +2641,7 @@ pkgdb_file_set_cksum(struct pkgdb *db, struct pkg_file *file,
 		return (EPKG_FATAL);
 	}
 	sqlite3_finalize(stmt);
-	file->sum = strdup(sum);
+	file->sum = xstrdup(sum);
 
 	return (EPKG_OK);
 }
@@ -2696,7 +2688,7 @@ pkgshell_open(const char **reponame)
 	dbdir = pkg_object_string(pkg_config_get("PKG_DBDIR"));
 
 	snprintf(localpath, sizeof(localpath), "%s/local.sqlite", dbdir);
-	*reponame = strdup(localpath);
+	*reponame = xstrdup(localpath);
 }
 
 static int

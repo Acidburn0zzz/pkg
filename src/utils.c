@@ -729,8 +729,6 @@ set_jobs_summary_pkg(struct pkg_jobs *jobs, struct pkg *new_pkg,
 	switch (type) {
 	case PKG_SOLVED_INSTALL:
 	case PKG_SOLVED_UPGRADE:
-		ret = EPKG_FATAL;
-
 		if (destdir == NULL)
 			ret = pkg_repo_cached_name(new_pkg, path, sizeof(path));
 		else if (repopath != NULL) {
@@ -1031,9 +1029,13 @@ drop_privileges(void)
 		if (nobody == NULL)
 			err(EXIT_FAILURE, "Unable to drop priviledges");
 		setgroups(1, &nobody->pw_gid);
-		setegid(nobody->pw_gid);
-		setgid(nobody->pw_gid);
-		seteuid(nobody->pw_uid);
-		setuid(nobody->pw_uid);
+		if (setegid(nobody->pw_gid) == -1)
+			err(EXIT_FAILURE, "Unable to setegid");
+		if (setgid(nobody->pw_gid) == -1)
+			err(EXIT_FAILURE, "Unable to setgid");
+		if (seteuid(nobody->pw_uid) == -1)
+			err(EXIT_FAILURE, "Unable to seteuid");
+		if (setuid(nobody->pw_uid) == -1)
+			err(EXIT_FAILURE, "Unable to setuid");
 	}
 }

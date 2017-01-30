@@ -41,6 +41,7 @@
 #include <osreldate.h>
 #endif
 #include <ucl.h>
+#include <sysexits.h>
 
 #include "pkg.h"
 #include "private/pkg.h"
@@ -506,8 +507,9 @@ disable_plugins_if_static(void)
 static void
 add_repo(const ucl_object_t *obj, struct pkg_repo *r, const char *rname, pkg_init_flags flags)
 {
-	const ucl_object_t *cur, *enabled;
+	const ucl_object_t *cur, *enabled, *env;
 	ucl_object_iter_t it = NULL;
+	struct pkg_kv *kv;
 	bool enable = true;
 	const char *url = NULL, *pubkey = NULL, *mirror_type = NULL;
 	const char *signature_type = NULL, *fingerprints = NULL;
@@ -518,6 +520,7 @@ add_repo(const ucl_object_t *obj, struct pkg_repo *r, const char *rname, pkg_ini
 
 	pkg_debug(1, "PkgConfig: parsing repository object %s", rname);
 
+	env = NULL;
 	enabled = ucl_object_find_key(obj, "enabled");
 	if (enabled == NULL)
 		enabled = ucl_object_find_key(obj, "ENABLED");
@@ -610,6 +613,13 @@ add_repo(const ucl_object_t *obj, struct pkg_repo *r, const char *rname, pkg_ini
 				return;
 			}
 			priority = ucl_object_toint(cur);
+		} else if (strcasecmp(key, "env") == 0) {
+			if (cur->type != UCL_OBJECT) {
+				pkg_emit_error("Expecting an object for the "
+					"'%s' key of the '%s' repo",
+					key, rname);
+			}
+			env = cur;
 		}
 	}
 
@@ -635,12 +645,12 @@ add_repo(const ucl_object_t *obj, struct pkg_repo *r, const char *rname, pkg_ini
 
 	if (fingerprints != NULL) {
 		free(r->fingerprints);
-		r->fingerprints = strdup(fingerprints);
+		r->fingerprints = xstrdup(fingerprints);
 	}
 
 	if (pubkey != NULL) {
 		free(r->pubkey);
-		r->pubkey = strdup(pubkey);
+		r->pubkey = xstrdup(pubkey);
 	}
 
 	r->enable = enable;
@@ -667,6 +677,15 @@ add_repo(const ucl_object_t *obj, struct pkg_repo *r, const char *rname, pkg_ini
 		r->flags = REPO_FLAGS_USE_IPV4;
 	else if (use_ipvx == 6)
 		r->flags = REPO_FLAGS_USE_IPV6;
+
+	if (env != NULL) {
+		it = NULL;
+		while ((cur = ucl_iterate_object(env, &it, true))) {
+			kv = pkg_kv_new(ucl_object_key(cur),
+			    ucl_object_tostring_forced(cur));
+			LL_APPEND(r->env, kv);
+		}
+	}
 }
 
 static void
@@ -726,8 +745,7 @@ load_repo_file(int dfd, const char *repodir, const char *repofile,
 	pkg_debug(1, "PKgConfig: loading %s/%s", repodir, repofile);
 	fd = openat(dfd, repofile, O_RDONLY);
 	if (fd == -1) {
-		pkg_emit_error("Unable to open '%s/%s': %s\n", repodir,
-		    repofile, strerror(errno));
+		pkg_errno("Unable to open '%s/%s'", repodir, repofile);
 		return;
 	}
 	if (!ucl_parser_add_fd(p, fd)) {
@@ -880,7 +898,7 @@ pkg_ini(const char *path, const char *reposdir, pkg_init_flags flags)
 			tmp = NULL;
 			if (c[i].def != NULL && c[i].def[0] == '/' &&
 			    pkg_rootdir != NULL) {
-				asprintf(&tmp, "%s%s", pkg_rootdir, c[i].def);
+				xasprintf(&tmp, "%s%s", pkg_rootdir, c[i].def);
 			}
 			obj = ucl_object_fromstring_common(
 			    c[i].def != NULL ? tmp != NULL ? tmp : c[i].def : "", 0, UCL_STRING_TRIM);
@@ -956,9 +974,9 @@ pkg_ini(const char *path, const char *reposdir, pkg_init_flags flags)
 	else
 		conffd = open(path, O_RDONLY);
 	if (conffd == -1 && errno != ENOENT) {
-		pkg_emit_error("Cannot open %s/%s: %s",
+		pkg_errno("Cannot open %s/%s",
 		    pkg_rootdir != NULL ? pkg_rootdir : "",
-		    path, strerror(errno));
+		    path);
 	}
 
 	p = ucl_parser_new(0);
@@ -1235,14 +1253,14 @@ pkg_repo_new(const char *name, const char *url, const char *type)
 {
 	struct pkg_repo *r;
 
-	r = calloc(1, sizeof(struct pkg_repo));
+	r = xcalloc(1, sizeof(struct pkg_repo));
 	r->ops = pkg_repo_find_type(type);
-	r->url = strdup(url);
+	r->url = xstrdup(url);
 	r->signature_type = SIG_NONE;
 	r->mirror_type = NOMIRROR;
 	r->enable = true;
 	r->meta = pkg_repo_meta_default();
-	r->name = strdup(name);
+	r->name = xstrdup(name);
 	HASH_ADD_KEYPTR(hh, repos, r->name, strlen(r->name), r);
 
 	return (r);
@@ -1254,10 +1272,10 @@ pkg_repo_overwrite(struct pkg_repo *r, const char *name, const char *url,
 {
 
 	free(r->name);
-	r->name = strdup(name);
+	r->name = xstrdup(name);
 	if (url != NULL) {
 		free(r->url);
-		r->url = strdup(url);
+		r->url = xstrdup(url);
 	}
 	r->ops = pkg_repo_find_type(type);
 	HASH_DEL(repos, r);
@@ -1267,6 +1285,8 @@ pkg_repo_overwrite(struct pkg_repo *r, const char *name, const char *url,
 static void
 pkg_repo_free(struct pkg_repo *r)
 {
+	struct pkg_kv *kv, *tmp;
+
 	free(r->url);
 	free(r->name);
 	free(r->pubkey);
@@ -1274,6 +1294,10 @@ pkg_repo_free(struct pkg_repo *r)
 	if (r->ssh != NULL) {
 		fprintf(r->ssh, "quit\n");
 		pclose(r->ssh);
+	}
+	LL_FOREACH_SAFE(r->env, kv, tmp) {
+		LL_DELETE(r->env, kv);
+		pkg_kv_free(kv);
 	}
 	free(r);
 }

@@ -69,29 +69,6 @@ _load_rsa_private_key(struct rsa_key *rsa)
 }
 
 static RSA *
-_load_rsa_public_key(const char *rsa_key_path)
-{
-	FILE *fp;
-	RSA *rsa = NULL;
-	char errbuf[1024];
-
-	if ((fp = fopen(rsa_key_path, "rb")) == NULL) {
-		pkg_emit_errno("fopen", rsa_key_path);
-		return (NULL);
-	}
-
-	if (!PEM_read_RSA_PUBKEY(fp, &rsa, NULL, NULL)) {
-		pkg_emit_error("error reading public key(%s): %s", rsa_key_path,
-		    ERR_error_string(ERR_get_error(), errbuf));
-		fclose(fp);
-		return (NULL);
-	}
-
-	fclose(fp);
-	return (rsa);
-}
-
-static RSA *
 _load_rsa_public_key_buf(unsigned char *cert, int certlen)
 {
 	RSA *rsa = NULL;
@@ -284,7 +261,7 @@ rsa_sign(char *path, struct rsa_key *rsa, unsigned char **sigret, unsigned int *
 	}
 
 	max_len = RSA_size(rsa->key);
-	*sigret = calloc(1, max_len + 1);
+	*sigret = xcalloc(1, max_len + 1);
 
 	sha256 = pkg_checksum_file(path, PKG_HASH_TYPE_SHA256_HEX);
 	if (sha256 == NULL)
@@ -309,7 +286,7 @@ rsa_new(struct rsa_key **rsa, pkg_password_cb *cb, char *path)
 {
 	assert(*rsa == NULL);
 
-	*rsa = calloc(1, sizeof(struct rsa_key));
+	*rsa = xcalloc(1, sizeof(struct rsa_key));
 	(*rsa)->path = path;
 	(*rsa)->pw_cb = cb;
 

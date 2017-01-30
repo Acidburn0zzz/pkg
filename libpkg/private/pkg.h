@@ -44,6 +44,7 @@
 #include <utstring.h>
 #include <ucl.h>
 
+#include "private/xmalloc.h"
 #include "private/utils.h"
 
 #define UCL_COUNT(obj) ((obj)?((obj)->len):0)
@@ -234,6 +235,8 @@ KHASH_MAP_INIT_STR(pkg_files, struct pkg_file *);
 KHASH_MAP_INIT_STR(pkg_dirs, struct pkg_dir *);
 KHASH_MAP_INIT_STR(pkg_config_files, struct pkg_config_file *);
 KHASH_MAP_INIT_STR(strings, char *);
+KHASH_MAP_INIT_STR(pkg_options, struct pkg_option *);
+KHASH_MAP_INIT_STR(pkg_conflicts, struct pkg_conflict *);
 
 struct pkg {
 	bool		 direct;
@@ -278,12 +281,14 @@ struct pkg {
 	struct pkg_file		*files;
 	kh_pkg_dirs_t		*dirhash;
 	struct pkg_dir		*dirs;
+	kh_pkg_options_t	*optionshash;
 	struct pkg_option	*options;
 	kh_strings_t		*users;
 	kh_strings_t		*groups;
 	kh_strings_t		*shlibs_required;
 	kh_strings_t		*shlibs_provided;
-	struct pkg_conflict *conflicts;
+	kh_pkg_conflicts_t	*conflictshash;
+	struct pkg_conflict	*conflicts;
 	kh_strings_t		*provides;
 	kh_strings_t		*requires;
 	kh_pkg_config_files_t	*config_files;
@@ -333,7 +338,7 @@ struct pkg_conflict {
 	char *uid;
 	char *digest;
 	enum pkg_conflict_type type;
-	UT_hash_handle	hh;
+	struct pkg_conflict *next;
 };
 
 typedef enum {
@@ -361,6 +366,7 @@ struct pkg_file {
 	char		 temppath[MAXPATHLEN];
 	u_long		 fflags;
 	struct pkg_config_file *config;
+	struct timespec	 time[2];
 	struct pkg_file	*next;
 };
 
@@ -382,7 +388,7 @@ struct pkg_option {
 	char	*value;
 	char	*default_value;
 	char	*description;
-	UT_hash_handle	hh;
+	struct pkg_option *next;
 };
 
 struct http_mirror {
@@ -527,6 +533,7 @@ struct pkg_repo {
 	unsigned int priority;
 
 	pkg_repo_flags flags;
+	struct pkg_kv *env;
 
 	/* Opaque repository data */
 	void *priv;
@@ -653,33 +660,20 @@ int pkg_validate(struct pkg *pkg, struct pkgdb *db);
 
 void pkg_list_free(struct pkg *, pkg_list);
 
-int pkg_kv_new(struct pkg_kv **, const char *key, const char *val);
+struct pkg_kv *pkg_kv_new(const char *key, const char *val);
 void pkg_kv_free(struct pkg_kv *);
 
-int pkg_dep_new(struct pkg_dep **);
 void pkg_dep_free(struct pkg_dep *);
-
-int pkg_file_new(struct pkg_file **);
 void pkg_file_free(struct pkg_file *);
-
-int pkg_dir_new(struct pkg_dir **);
-void pkg_dir_free(struct pkg_dir *);
-
-int pkg_option_new(struct pkg_option **);
 void pkg_option_free(struct pkg_option *);
+void pkg_conflict_free(struct pkg_conflict *);
+void pkg_config_file_free(struct pkg_config_file *);
 
 int pkg_jobs_resolv(struct pkg_jobs *jobs);
 
-int pkg_conflict_new(struct pkg_conflict **);
-void pkg_conflict_free(struct pkg_conflict *);
-
-int pkg_config_file_new(struct pkg_config_file **);
-void pkg_config_file_free(struct pkg_config_file *);
-
 struct packing;
 
-int packing_init(struct packing **pack, const char *path, pkg_formats format,
-    bool passmode);
+int packing_init(struct packing **pack, const char *path, pkg_formats format);
 int packing_append_file_attr(struct packing *pack, const char *filepath,
      const char *newpath, const char *uname, const char *gname, mode_t perm,
      u_long fflags);
@@ -810,5 +804,8 @@ enum pkg_metalog_type {
 
 int pkg_set_from_file(struct pkg *pkg, pkg_attr attr, const char *file, bool trimcr);
 int pkg_set_from_fileat(int fd, struct pkg *pkg, pkg_attr attr, const char *file, bool trimcr);
+void pkg_rollback_cb(void *);
+void pkg_rollback_pkg(struct pkg *);
+int pkg_add_fromdir(struct pkg *, const char *);
 
 #endif

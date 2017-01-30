@@ -73,6 +73,7 @@ struct digest_list_entry {
 
 struct pkg_conflict_bulk {
 	struct pkg_conflict *conflicts;
+	kh_pkg_conflicts_t *conflictshash;
 	char *file;
 	UT_hash_handle hh;
 };
@@ -89,70 +90,10 @@ pkg_repo_new_conflict(const char *uniqueid, struct pkg_conflict_bulk *bulk)
 {
 	struct pkg_conflict *new;
 
-	pkg_conflict_new(&new);
-	new->uid = strdup(uniqueid);
+	new = xcalloc(1, sizeof(*new));
+	new->uid = xstrdup(uniqueid);
 
-	HASH_ADD_KEYPTR(hh, bulk->conflicts, new->uid, strlen(new->uid), new);
-}
-
-static void
-pkg_repo_write_conflicts (struct pkg_conflict_bulk *bulk, FILE *out)
-{
-	struct pkg_conflict_bulk	*pkg_bulk = NULL, *cur, *tmp, *s;
-	struct pkg_conflict	*c1, *c1tmp, *c2, *c2tmp, *ctmp;
-
-	/*
-	 * Here we reorder bulk hash from hash by file
-	 * to hash indexed by a package, so we iterate over the
-	 * original hash and create a new hash indexed by package name
-	 */
-
-	HASH_ITER (hh, bulk, cur, tmp) {
-		HASH_ITER (hh, cur->conflicts, c1, c1tmp) {
-			HASH_FIND_STR(pkg_bulk, c1->uid, s);
-			if (s == NULL) {
-				/* New entry required */
-				s = malloc(sizeof(struct pkg_conflict_bulk));
-				if (s == NULL) {
-					pkg_emit_errno("malloc", "struct pkg_conflict_bulk");
-					goto out;
-				}
-				memset(s, 0, sizeof(struct pkg_conflict_bulk));
-				s->file = c1->uid;
-				HASH_ADD_KEYPTR(hh, pkg_bulk, s->file, strlen(s->file), s);
-			}
-			/* Now add all new entries from this file to this conflict structure */
-			HASH_ITER (hh, cur->conflicts, c2, c2tmp) {
-				if (strcmp(c1->uid, c2->uid) == 0)
-					continue;
-
-				HASH_FIND_STR(s->conflicts, c2->uid, ctmp);
-				if (ctmp == NULL)
-					pkg_repo_new_conflict(c2->uid, s);
-			}
-		}
-	}
-
-	HASH_ITER (hh, pkg_bulk, cur, tmp) {
-		fprintf(out, "%s:", cur->file);
-		HASH_ITER (hh, cur->conflicts, c1, c1tmp) {
-			if (c1->hh.next != NULL)
-				fprintf(out, "%s,", c1->uid);
-			else
-				fprintf(out, "%s\n", c1->uid);
-		}
-	}
-out:
-	HASH_ITER (hh, pkg_bulk, cur, tmp) {
-		HASH_ITER (hh, cur->conflicts, c1, c1tmp) {
-			HASH_DEL(cur->conflicts, c1);
-			free(c1->uid);
-			free(c1);
-		}
-		HASH_DEL(pkg_bulk, cur);
-		free(cur);
-	}
-	return;
+	kh_safe_add(pkg_conflicts, bulk->conflictshash, new, new->uid);
 }
 
 struct pkg_fts_item {
@@ -170,23 +111,18 @@ pkg_create_repo_fts_new(FTSENT *fts, const char *root_path)
 	struct pkg_fts_item *item;
 	char *pkg_path;
 
-	item = malloc(sizeof(*item));
-	if (item != NULL) {
-		item->fts_accpath = strdup(fts->fts_accpath);
-		item->fts_name = strdup(fts->fts_name);
-		item->fts_size = fts->fts_statp->st_size;
-		item->fts_info = fts->fts_info;
+	item = xmalloc(sizeof(*item));
+	item->fts_accpath = xstrdup(fts->fts_accpath);
+	item->fts_name = xstrdup(fts->fts_name);
+	item->fts_size = fts->fts_statp->st_size;
+	item->fts_info = fts->fts_info;
 
-		pkg_path = fts->fts_path;
-		pkg_path += strlen(root_path);
-		while (pkg_path[0] == '/')
-			pkg_path++;
+	pkg_path = fts->fts_path;
+	pkg_path += strlen(root_path);
+	while (pkg_path[0] == '/')
+		pkg_path++;
 
-		item->pkg_path = strdup(pkg_path);
-	}
-	else {
-		pkg_emit_errno("malloc", "struct pkg_fts_item");
-	}
+	item->pkg_path = xstrdup(pkg_path);
 
 	return (item);
 }
@@ -363,7 +299,7 @@ pkg_create_repo_worker(struct pkg_fts_item *start, size_t nelts,
 			pkg->sum = pkg_checksum_file(cur->fts_accpath,
 			    PKG_HASH_TYPE_SHA256_HEX);
 			pkg->pkgsize = cur->fts_size;
-			pkg->repopath = strdup(cur->pkg_path);
+			pkg->repopath = xstrdup(cur->pkg_path);
 
 			/*
 			 * TODO: use pkg_checksum for new manifests
@@ -372,7 +308,7 @@ pkg_create_repo_worker(struct pkg_fts_item *start, size_t nelts,
 			if (legacy)
 				pkg_emit_manifest_buf(pkg, b, PKG_MANIFEST_EMIT_COMPACT, &mdigest);
 			else {
-				mdigest = malloc(pkg_checksum_type_size(meta->digest_format));
+				mdigest = xmalloc(pkg_checksum_type_size(meta->digest_format));
 
 				pkg_emit_manifest_buf(pkg, b, PKG_MANIFEST_EMIT_COMPACT, NULL);
 				if (pkg_checksum_generate(pkg, mdigest,
@@ -502,13 +438,13 @@ pkg_create_repo_read_pipe(int fd, struct digest_list_entry **dlist)
 			if (buf[i] == ':') {
 				switch(state) {
 				case s_set_origin:
-					dig = calloc(1, sizeof(*dig));
-					dig->origin = malloc(i - start + 1);
+					dig = xcalloc(1, sizeof(*dig));
+					dig->origin = xmalloc(i - start + 1);
 					strlcpy(dig->origin, &buf[start], i - start + 1);
 					state = s_set_digest;
 					break;
 				case s_set_digest:
-					dig->digest = malloc(i - start + 1);
+					dig->digest = xmalloc(i - start + 1);
 					strlcpy(dig->digest, &buf[start], i - start + 1);
 					state = s_set_mpos;
 					break;
@@ -525,7 +461,7 @@ pkg_create_repo_read_pipe(int fd, struct digest_list_entry **dlist)
 					state = s_set_checksum;
 					break;
 				case s_set_checksum:
-					dig->checksum =  malloc(i - start + 1);
+					dig->checksum =  xmalloc(i - start + 1);
 					strlcpy(dig->digest, &buf[start], i - start + 1);
 					state = s_set_origin;
 					break;
@@ -537,14 +473,13 @@ pkg_create_repo_read_pipe(int fd, struct digest_list_entry **dlist)
 					dig->manifest_length = strtol(&buf[start], NULL, 10);
 				}
 				else if (state == s_set_checksum) {
-					dig->checksum =  malloc(i - start + 1);
+					dig->checksum =  xmalloc(i - start + 1);
 					strlcpy(dig->checksum, &buf[start], i - start + 1);
 				}
 				assert(dig->origin != NULL);
 				assert(dig->digest != NULL);
 				DL_APPEND(*dlist, dig);
 				state = s_set_origin;
-				start = i + 1;
 				break;
 			}
 			else if (buf[i] == '.' && buf[i + 1] == '\n') {
@@ -568,8 +503,6 @@ pkg_create_repo(char *path, const char *output_dir, bool filelist,
 {
 	FTS *fts = NULL;
 	struct pkg_fts_item *fts_items = NULL, *fts_cur, *fts_start;
-
-	struct pkg_conflict *c, *ctmp;
 	struct pkg_conflict_bulk *conflicts = NULL, *curcb, *tmpcb;
 	int num_workers, i, remaining_workers, remain, cur_jobs, remain_jobs, nworker;
 	size_t len, tasks_per_worker, ntask;
@@ -595,9 +528,8 @@ pkg_create_repo(char *path, const char *output_dir, bool filelist,
 		/* Try to create dir */
 		if (errno == ENOENT) {
 			if (mkdir(output_dir, 00755) == -1) {
-				pkg_emit_error("cannot create output directory %s: %s",
-					output_dir, strerror(errno));
-				return (EPKG_FATAL);
+				pkg_fatal_errno("cannot create output directory %s",
+					output_dir);
 			}
 		}
 		else {
@@ -676,7 +608,7 @@ pkg_create_repo(char *path, const char *output_dir, bool filelist,
 	/* Launch workers */
 	pkg_emit_progress_start("Creating repository in %s", output_dir);
 
-	pfd = calloc(num_workers, sizeof(struct pollfd));
+	pfd = xcalloc(num_workers, sizeof(struct pollfd));
 	ntask = 0;
 	cur_jobs = (remain > 0) ? tasks_per_worker + 1 : tasks_per_worker;
 	remain_jobs = cur_jobs;
@@ -787,13 +719,6 @@ pkg_create_repo(char *path, const char *output_dir, bool filelist,
 	/* Now sort all digests */
 	DL_SORT(dlist, pkg_digest_sort_compare_func);
 
-	/*
-	 * XXX: it is not used actually
-	 */
-#if 0
-	pkg_repo_write_conflicts(conflicts, fconflicts);
-#endif
-
 	/* Write metafile */
 	if (!legacy) {
 		ucl_object_t *meta_dump;
@@ -813,11 +738,8 @@ pkg_create_repo(char *path, const char *output_dir, bool filelist,
 	}
 cleanup:
 	HASH_ITER (hh, conflicts, curcb, tmpcb) {
-		HASH_ITER (hh, curcb->conflicts, c, ctmp) {
-			free(c->uid);
-			HASH_DEL(curcb->conflicts, c);
-			free(c);
-		}
+		LL_FREE(curcb->conflicts, pkg_conflict_free);
+		kh_destroy_pkg_conflicts(curcb->conflictshash);
 		HASH_DEL(conflicts, curcb);
 		free(curcb);
 	}
@@ -936,7 +858,7 @@ pkg_repo_pack_db(const char *name, const char *archive, char *path,
 	sig = NULL;
 	pub = NULL;
 
-	if (packing_init(&pack, archive, meta->packing_format, false) != EPKG_OK)
+	if (packing_init(&pack, archive, meta->packing_format) != EPKG_OK)
 		return (EPKG_FATAL);
 
 	if (rsa != NULL) {

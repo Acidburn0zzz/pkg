@@ -120,12 +120,15 @@ struct pkg_jobs {
 	bool pinning;
 };
 
+#define PKG_PATTERN_FLAG_FILE (1 << 0)
+#define PKG_PATTERN_FLAG_VULN (1 << 1)
+
 struct job_pattern {
 	char		*pattern;
 	char		*path;
-	match_t		match;
-	bool		is_file;
-	UT_hash_handle hh;
+	match_t		 match;
+	int		 flags;
+	struct job_pattern *next;
 };
 
 enum pkg_priority_update_type {

@@ -5,6 +5,7 @@
  * Copyright (c) 2011 Philippe Pepiot <phil@philpep.org>
  * Copyright (c) 2011-2012 Marin Atanasov Nikolov <dnaeon@gmail.com>
  * Copyright (c) 2013-2014 Matthew Seaman <matthew@FreeBSD.org>
+ * Copyright (c) 2014-2016 Vsevolod Stakhov <vsevolod@FreeBSD.org>
  * All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
@@ -43,7 +44,6 @@ extern "C" {
 #include <stdarg.h>
 #include <stdbool.h>
 #include <stdio.h>
-#include <sysexits.h>
 
 /* The expected name of the pkg(8) binary executable. */
 #ifndef PKG_EXEC_NAME
@@ -370,7 +370,8 @@ typedef enum _pkg_flags {
 	PKG_FLAG_FORCE_MISSING = (1U << 9),
 	PKG_FLAG_FETCH_MIRROR = (1U << 10),
 	PKG_FLAG_USE_IPV4 = (1U << 11),
-	PKG_FLAG_USE_IPV6 = (1U << 12)
+	PKG_FLAG_USE_IPV6 = (1U << 12),
+	PKG_FLAG_UPGRADE_VULNERABLE = (1U << 13)
 } pkg_flags;
 
 typedef enum _pkg_stats_t {
@@ -1214,11 +1215,6 @@ int pkg_repo_cached_name(struct pkg *pkg, char *dest, size_t destlen);
 
 /* glue to deal with ports */
 int ports_parse_plist(struct pkg *, const char *, const char *);
-
-/**
- * @todo Document
- */
-int pkg_copy_tree(struct pkg *, const char *src, const char *dest);
 
 /**
  * Special structure to report about conflicts

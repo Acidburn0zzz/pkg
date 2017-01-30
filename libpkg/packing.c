@@ -43,73 +43,55 @@
 static const char *packing_set_format(struct archive *a, pkg_formats format);
 
 struct packing {
-	bool pass;
 	struct archive *aread;
 	struct archive *awrite;
 	struct archive_entry_linkresolver *resolver;
 };
 
 int
-packing_init(struct packing **pack, const char *path, pkg_formats format, bool passmode)
+packing_init(struct packing **pack, const char *path, pkg_formats format)
 {
 	char archive_path[MAXPATHLEN];
 	const char *ext;
 
 	assert(pack != NULL);
 
-	if (passmode && !is_dir(path)) {
-		pkg_emit_error("When using passmode, a directory should be provided");
-		return (EPKG_FATAL);
-	}
-
-	if ((*pack = calloc(1, sizeof(struct packing))) == NULL) {
-		pkg_emit_errno("calloc", "packing");
-		return (EPKG_FATAL);
-	}
+	*pack = xcalloc(1, sizeof(struct packing));
 
 	(*pack)->aread = archive_read_disk_new();
 	archive_read_disk_set_standard_lookup((*pack)->aread);
 	archive_read_disk_set_symlink_physical((*pack)->aread);
 
-	if (!passmode) {
-		(*pack)->pass = false;
-		(*pack)->awrite = archive_write_new();
-		archive_write_set_format_pax_restricted((*pack)->awrite);
-		ext = packing_set_format((*pack)->awrite, format);
-		if (ext == NULL) {
-			archive_read_close((*pack)->aread);
-			archive_read_free((*pack)->aread);
-			archive_write_close((*pack)->awrite);
-			archive_write_free((*pack)->awrite);
-			*pack = NULL;
-			return EPKG_FATAL; /* error set by _set_format() */
-		}
-		snprintf(archive_path, sizeof(archive_path), "%s.%s", path,
-		    ext);
+	(*pack)->awrite = archive_write_new();
+	archive_write_set_format_pax_restricted((*pack)->awrite);
+	ext = packing_set_format((*pack)->awrite, format);
+	if (ext == NULL) {
+		archive_read_close((*pack)->aread);
+		archive_read_free((*pack)->aread);
+		archive_write_close((*pack)->awrite);
+		archive_write_free((*pack)->awrite);
+		*pack = NULL;
+		return EPKG_FATAL; /* error set by _set_format() */
+	}
+	snprintf(archive_path, sizeof(archive_path), "%s.%s", path,
+	    ext);
 
-		pkg_debug(1, "Packing to file '%s'", archive_path);
-		if (archive_write_open_filename(
-		    (*pack)->awrite, archive_path) != ARCHIVE_OK) {
-			pkg_emit_errno("archive_write_open_filename",
-			    archive_path);
-			archive_read_close((*pack)->aread);
-			archive_read_free((*pack)->aread);
-			archive_write_close((*pack)->awrite);
-			archive_write_free((*pack)->awrite);
-			*pack = NULL;
-			return EPKG_FATAL;
-		}
-	} else { /* pass mode directly write to the disk */
-		pkg_debug(1, "Packing to directory '%s' (pass mode)", path);
-		(*pack)->pass = true;
-		(*pack)->awrite = archive_write_disk_new();
-		archive_write_disk_set_options((*pack)->awrite,
-		    EXTRACT_ARCHIVE_FLAGS| ARCHIVE_EXTRACT_UNLINK);
+	pkg_debug(1, "Packing to file '%s'", archive_path);
+	if (archive_write_open_filename(
+	    (*pack)->awrite, archive_path) != ARCHIVE_OK) {
+		pkg_emit_errno("archive_write_open_filename",
+		    archive_path);
+		archive_read_close((*pack)->aread);
+		archive_read_free((*pack)->aread);
+		archive_write_close((*pack)->awrite);
+		archive_write_free((*pack)->awrite);
+		*pack = NULL;
+		return EPKG_FATAL;
 	}
 
 	(*pack)->resolver = archive_entry_linkresolver_new();
 	archive_entry_linkresolver_set_strategy((*pack)->resolver,
-	    ARCHIVE_FORMAT_TAR_PAX_RESTRICTED);
+	    archive_format((*pack)->awrite));
 
 	return (EPKG_OK);
 }
@@ -189,28 +171,10 @@ packing_append_file_attr(struct packing *pack, const char *filepath,
 	}
 
 	if (uname != NULL && uname[0] != '\0') {
-		if (pack->pass) {
-			struct passwd* pw = getpwnam(uname);
-			if (pw == NULL) {
-				pkg_emit_error("Unknown user: '%s'", uname);
-				retcode = EPKG_FATAL;
-				goto cleanup;
-			}
-			archive_entry_set_uid(entry, pw->pw_uid);
-		}
 		archive_entry_set_uname(entry, uname);
 	}
 
 	if (gname != NULL && gname[0] != '\0') {
-		if (pack->pass) {
-			struct group *gr = (getgrnam(gname));
-			if (gr == NULL) {
-				pkg_emit_error("Unknown group: '%s'", gname);
-				retcode = EPKG_FATAL;
-				goto cleanup;
-			}
-			archive_entry_set_gid(entry, gr->gr_gid);
-		}
 		archive_entry_set_gname(entry, gname);
 	}
 

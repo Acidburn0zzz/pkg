@@ -106,7 +106,7 @@ pkg_delete(struct pkg *pkg, struct pkgdb *db, unsigned flags)
 		return (ret);
 
 	if ((flags & (PKG_DELETE_NOSCRIPT | PKG_DELETE_UPGRADE)) == 0)
-		ret = pkg_script_run(pkg, PKG_SCRIPT_POST_DEINSTALL);
+		pkg_script_run(pkg, PKG_SCRIPT_POST_DEINSTALL);
 
 	ret = pkg_delete_dirs(db, pkg, NULL);
 	if (ret != EPKG_OK)
@@ -128,8 +128,8 @@ pkg_delete(struct pkg *pkg, struct pkgdb *db, unsigned flags)
 			if (utstring_len(message) > 0) {
 				pkg_emit_message(utstring_body(message));
 			}
-			utstring_free(message);
 		}
+		utstring_free(message);
 
 	}
 
@@ -168,7 +168,7 @@ pkg_add_dir_to_del(struct pkg *pkg, const char *file, const char *dir)
 			pkg_debug(1, "Replacing in deletion %s with %s",
 			    pkg->dir_to_del[i], path);
 			free(pkg->dir_to_del[i]);
-			pkg->dir_to_del[i] = strdup(path);
+			pkg->dir_to_del[i] = xstrdup(path);
 			return;
 		}
 	}
@@ -177,11 +177,11 @@ pkg_add_dir_to_del(struct pkg *pkg, const char *file, const char *dir)
 
 	if (pkg->dir_to_del_len + 1 > pkg->dir_to_del_cap) {
 		pkg->dir_to_del_cap += 64;
-		pkg->dir_to_del = realloc(pkg->dir_to_del,
+		pkg->dir_to_del = xrealloc(pkg->dir_to_del,
 		    pkg->dir_to_del_cap * sizeof(char *));
 	}
 
-	pkg->dir_to_del[pkg->dir_to_del_len++] = strdup(path);
+	pkg->dir_to_del[pkg->dir_to_del_len++] = xstrdup(path);
 }
 
 static void
@@ -406,10 +406,10 @@ pkg_delete_dir(struct pkg *pkg, struct pkg_dir *dir)
 	} else {
 		if (pkg->dir_to_del_len + 1 > pkg->dir_to_del_cap) {
 			pkg->dir_to_del_cap += 64;
-			pkg->dir_to_del = realloc(pkg->dir_to_del,
+			pkg->dir_to_del = xrealloc(pkg->dir_to_del,
 			    pkg->dir_to_del_cap * sizeof(char *));
 		}
-		pkg->dir_to_del[pkg->dir_to_del_len++] = strdup(path);
+		pkg->dir_to_del[pkg->dir_to_del_len++] = xstrdup(path);
 	}
 }
 

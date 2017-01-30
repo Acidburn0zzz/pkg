@@ -73,7 +73,7 @@ gethttpmirrors(struct pkg_repo *repo, const char *url) {
 				continue;
 
 			if ((u = fetchParseURL(line)) != NULL) {
-				m = malloc(sizeof(struct http_mirror));
+				m = xmalloc(sizeof(struct http_mirror));
 				m->url = u;
 				LL_APPEND(repo->http, m);
 			}
@@ -460,6 +460,10 @@ pkg_fetch_file_to_fd(struct pkg_repo *repo, const char *url, int dest,
 	FILE		*remote = NULL;
 	struct url	*u = NULL;
 	struct url_stat	 st;
+	struct pkg_kv	*kv, *kvtmp;
+	struct pkg_kv	*envtorestore = NULL;
+	struct pkg_kv	*envtounset = NULL;
+	char		*tmp;
 	off_t		 done = 0;
 	off_t		 r;
 	int64_t		 max_retry, retry;
@@ -511,6 +515,18 @@ pkg_fetch_file_to_fd(struct pkg_repo *repo, const char *url, int dest,
 
 		url += strlen(URL_SCHEME_PREFIX);
 		pkg_url_scheme = true;
+
+		LL_FOREACH(repo->env, kv) {
+			kvtmp = xcalloc(1, sizeof(*kvtmp));
+			kvtmp->key = xstrdup(kv->key);
+			if ((tmp = getenv(kv->key)) != NULL) {
+				kvtmp->value = xstrdup(tmp);
+				LL_APPEND(envtorestore, kvtmp);
+			} else {
+				LL_APPEND(envtounset, kvtmp);
+			}
+			setenv(kv->key, kv->value, 1);
+		}
 	}
 
 	u = fetchParseURL(url);
@@ -680,6 +696,18 @@ pkg_fetch_file_to_fd(struct pkg_repo *repo, const char *url, int dest,
 	}
 
 cleanup:
+	if (repo != NULL) {
+		LL_FOREACH_SAFE(envtorestore, kv, kvtmp) {
+			setenv(kv->key, kv->value, 1);
+			LL_DELETE(envtorestore, kv);
+			pkg_kv_free(kv);
+		}
+		LL_FOREACH_SAFE(envtounset, kv, kvtmp) {
+			unsetenv(kv->key);
+			pkg_kv_free(kv);
+		}
+	}
+
 	if (u != NULL) {
 		if (remote != NULL &&  repo != NULL && remote != repo->ssh)
 			fclose(remote);
