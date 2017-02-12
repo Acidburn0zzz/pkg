@@ -85,6 +85,11 @@ pkg_CFLAGS+=	-fsanitize=safe-stack
 pkg_LDFLAGS+=	-fsanitize=safe-stack
 endif
 
+if ENABLE_CFI
+pkg_CFLAGS+=	-fsanitize=cfi -fvisibility=hidden -flto
+pkg_LDFLAGS+=	-fsanitize=cfi -fvisibility=hidden -flto
+endif
+
 if HAVE_ELF_ABI
 if LIBELF_BUNDLED
 pkg_static_LDADD+=	$(top_builddir)/external/libelf_static.la
